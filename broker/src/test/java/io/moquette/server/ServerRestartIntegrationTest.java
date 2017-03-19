@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2012-2015 The original author or authors
+ * Copyright (c) 2012-2017 The original author or authorsgetRockQuestions()
  * ------------------------------------------------------
  * All rights reserved. This program and the accompanying materials
  * are made available under the terms of the Eclipse Public License v1.0
@@ -13,6 +13,7 @@
  *
  * You may elect to redistribute this code under either of these licenses.
  */
+
 package io.moquette.server;
 
 import io.moquette.server.config.IConfig;
@@ -23,7 +24,6 @@ import org.junit.After;
 import org.junit.Before;
 import org.junit.BeforeClass;
 import org.junit.Test;
-
 import java.io.File;
 import java.io.IOException;
 import java.util.Properties;
@@ -48,7 +48,7 @@ public class ServerRestartIntegrationTest {
 
     protected void startServer() throws IOException {
         m_server = new Server();
-        final Properties configProps = IntegrationUtils.prepareTestPropeties();
+        final Properties configProps = IntegrationUtils.prepareTestProperties();
         m_config = new MemoryConfig(configProps);
         m_server.startServer(m_config);
     }
@@ -63,9 +63,9 @@ public class ServerRestartIntegrationTest {
 
     @Before
     public void setUp() throws Exception {
-        startServer();
         String dbPath = IntegrationUtils.localMapDBPath();
         IntegrationUtils.cleanPersistenceFile(dbPath);
+        startServer();
 
         m_subscriber = new MqttClient("tcp://localhost:1883", "Subscriber", s_dataStore);
         m_messageCollector = new MessageCollector();
@@ -87,48 +87,46 @@ public class ServerRestartIntegrationTest {
         m_server.stopServer();
         IntegrationUtils.cleanPersistenceFile(m_config);
     }
-    
-    
+
     @Test
     public void checkRestartCleanSubscriptionTree() throws Exception {
-        //subscribe to /topic
+        // subscribe to /topic
         m_subscriber.connect(CLEAN_SESSION_OPT);
         m_subscriber.subscribe("/topic", 1);
         m_subscriber.disconnect();
-        
-        //shutdown the server
+
+        // shutdown the server
         m_server.stopServer();
         IntegrationUtils.cleanPersistenceFile(m_config);
 
-        //restart the server
-        m_server.startServer(IntegrationUtils.prepareTestPropeties());
-        
-        //reconnect the Subscriber subscribing to the same /topic but different QoS
+        // restart the server
+        m_server.startServer(IntegrationUtils.prepareTestProperties());
+
+        // reconnect the Subscriber subscribing to the same /topic but different QoS
         m_subscriber.connect(CLEAN_SESSION_OPT);
         m_subscriber.subscribe("/topic", 2);
-        
-        //should be just one registration so a publisher receive one notification
+
+        // should be just one registration so a publisher receive one notification
         m_publisher.connect(CLEAN_SESSION_OPT);
         m_publisher.publish("/topic", "Hello world MQTT!!".getBytes(), 1, false);
-        
-        //read the messages
-        MqttMessage msg = m_messageCollector.getMessage(true);
-        assertEquals("Hello world MQTT!!", new String(msg.getPayload()));
-        //no more messages on the same topic will be received
-        assertNull(m_messageCollector.getMessage(1));
-    }
 
+        // read the messages
+        MqttMessage msg = m_messageCollector.waitMessage(1);
+        assertEquals("Hello world MQTT!!", new String(msg.getPayload()));
+        // no more messages on the same topic will be received
+        assertNull(m_messageCollector.waitMessage(1));
+    }
 
     @Test
     public void checkDontPublishInactiveClientsAfterServerRestart() throws Exception {
         IMqttClient conn = subscribeAndPublish("/topic");
         conn.disconnect();
 
-        //shutdown the server
+        // shutdown the server
         m_server.stopServer();
 
-        //restart the server
-        m_server.startServer(IntegrationUtils.prepareTestPropeties());
+        // restart the server
+        m_server.startServer(IntegrationUtils.prepareTestProperties());
 
         m_publisher.connect();
         m_publisher.publish("/topic", "Hello world MQTT!!".getBytes(), 0, false);
@@ -136,37 +134,37 @@ public class ServerRestartIntegrationTest {
 
     @Test
     public void testClientDoesntRemainSubscribedAfterASubscriptionAndServerRestart() throws Exception {
-        //subscribe to /topic
+        // subscribe to /topic
         m_subscriber.connect();
-        //subscribe /topic
+        // subscribe /topic
         m_subscriber.subscribe("/topic", 0);
-        //unsubscribe from /topic
+        // unsubscribe from /topic
         m_subscriber.unsubscribe("/topic");
         m_subscriber.disconnect();
 
-        //shutdown the server
+        // shutdown the server
         m_server.stopServer();
 
-        //restart the server
-        m_server.startServer(IntegrationUtils.prepareTestPropeties());
-        //subscriber reconnects
+        // restart the server
+        m_server.startServer(IntegrationUtils.prepareTestProperties());
+        // subscriber reconnects
         m_subscriber = new MqttClient("tcp://localhost:1883", "Subscriber", s_dataStore);
         m_subscriber.setCallback(m_messageCollector);
         m_subscriber.connect();
 
-        //publisher publishes on /topic
+        // publisher publishes on /topic
         m_publisher = new MqttClient("tcp://localhost:1883", "Publisher", s_pubDataStore);
         m_publisher.connect();
         m_publisher.publish("/topic", "Hello world MQTT!!".getBytes(), 1, false);
 
-        //Expected
-        //the subscriber doesn't get notified (it's fully unsubscribed)
-        assertNull(m_messageCollector.getMessage(1));
+        // Expected
+        // the subscriber doesn't get notified (it's fully unsubscribed)
+        assertNull(m_messageCollector.waitMessage(1));
     }
 
     /**
      * Connect subscribe to topic and publish on the same topic
-     * */
+     */
     private IMqttClient subscribeAndPublish(String topic) throws Exception {
         IMqttClient client = new MqttClient("tcp://localhost:1883", "SubPub");
         MessageCollector collector = new MessageCollector();
@@ -174,7 +172,7 @@ public class ServerRestartIntegrationTest {
         client.connect();
         client.subscribe(topic, 1);
         client.publish(topic, "Hello world MQTT!!".getBytes(), 0, false);
-        MqttMessage msg = collector.getMessage(true);
+        MqttMessage msg = collector.waitMessage(1);
         assertEquals("Hello world MQTT!!", new String(msg.getPayload()));
         return client;
     }

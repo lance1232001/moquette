@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2012-2015 The original author or authors
+ * Copyright (c) 2012-2017 The original author or authorsgetRockQuestions()
  * ------------------------------------------------------
  * All rights reserved. This program and the accompanying materials
  * are made available under the terms of the Eclipse Public License v1.0
@@ -13,15 +13,15 @@
  *
  * You may elect to redistribute this code under either of these licenses.
  */
+
 package io.moquette.server;
 
 import io.moquette.server.config.IConfig;
-
 import java.io.File;
 import java.util.Properties;
-
 import static io.moquette.BrokerConstants.DEFAULT_MOQUETTE_STORE_MAP_DB_FILENAME;
 import static io.moquette.BrokerConstants.PERSISTENT_STORE_PROPERTY_NAME;
+import static io.moquette.BrokerConstants.PORT_PROPERTY_NAME;
 import static org.junit.Assert.assertFalse;
 
 /**
@@ -30,14 +30,28 @@ import static org.junit.Assert.assertFalse;
  * Created by andrea on 4/7/15.
  */
 public class IntegrationUtils {
+
     static String localMapDBPath() {
         String currentDir = System.getProperty("user.dir");
         return currentDir + File.separator + DEFAULT_MOQUETTE_STORE_MAP_DB_FILENAME;
     }
 
-    public static Properties prepareTestPropeties() {
+    static String localClusterMapDBPath(int port) {
+        String currentDir = System.getProperty("user.dir");
+        return currentDir + File.separator + port + DEFAULT_MOQUETTE_STORE_MAP_DB_FILENAME;
+    }
+
+    public static Properties prepareTestProperties() {
         Properties testProperties = new Properties();
         testProperties.put(PERSISTENT_STORE_PROPERTY_NAME, IntegrationUtils.localMapDBPath());
+        testProperties.put(PORT_PROPERTY_NAME, "1883");
+        return testProperties;
+    }
+
+    public static Properties prepareTestClusterProperties(int port) {
+        Properties testProperties = new Properties();
+        testProperties.put(PERSISTENT_STORE_PROPERTY_NAME, IntegrationUtils.localClusterMapDBPath(port));
+        testProperties.put(PORT_PROPERTY_NAME, Integer.toString(port));
         return testProperties;
     }
 

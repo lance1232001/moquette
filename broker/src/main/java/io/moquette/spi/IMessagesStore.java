@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2012-2015 The original author or authors
+ * Copyright (c) 2012-2017 The original author or authorsgetRockQuestions()
  * ------------------------------------------------------
  * All rights reserved. This program and the accompanying materials
  * are made available under the terms of the Eclipse Public License v1.0
@@ -13,14 +13,16 @@
  *
  * You may elect to redistribute this code under either of these licenses.
  */
+
 package io.moquette.spi;
 
+import io.moquette.spi.impl.subscriptions.Topic;
+import io.netty.buffer.ByteBuf;
+import io.netty.buffer.Unpooled;
+import io.netty.handler.codec.mqtt.MqttQoS;
 import java.io.Serializable;
 import java.nio.ByteBuffer;
-import io.moquette.parser.proto.messages.AbstractMessage;
-
 import java.util.Collection;
-import java.util.List;
 
 /**
  * Defines the SPI to be implemented by a StorageService that handle persistence of messages
@@ -28,22 +30,24 @@ import java.util.List;
 public interface IMessagesStore {
 
     class StoredMessage implements Serializable {
-        final AbstractMessage.QOSType m_qos;
+
+        private static final long serialVersionUID = 1755296138639817304L;
+        final MqttQoS m_qos;
         final byte[] m_payload;
         final String m_topic;
         private boolean m_retained;
         private String m_clientID;
-        //Optional attribute, available only fo QoS 1 and 2
+        // Optional attribute, available only fo QoS 1 and 2
         private Integer m_msgID;
-        private String m_guid;
+        private MessageGUID m_guid;
 
-        public StoredMessage(byte[] message, AbstractMessage.QOSType qos, String topic) {
+        public StoredMessage(byte[] message, MqttQoS qos, String topic) {
             m_qos = qos;
             m_payload = message;
             m_topic = topic;
         }
 
-        public AbstractMessage.QOSType getQos() {
+        public MqttQoS getQos() {
             return m_qos;
         }
 
@@ -55,11 +59,11 @@ public interface IMessagesStore {
             return m_topic;
         }
 
-        public void setGuid(String guid) {
+        public void setGuid(MessageGUID guid) {
             this.m_guid = guid;
         }
 
-        public String getGuid() {
+        public MessageGUID getGuid() {
             return m_guid;
         }
 
@@ -79,8 +83,8 @@ public interface IMessagesStore {
             return m_msgID;
         }
 
-        public ByteBuffer getMessage() {
-            return ByteBuffer.wrap(m_payload);
+        public ByteBuf getMessage() {
+            return Unpooled.copiedBuffer(m_payload);
         }
 
         public void setRetained(boolean retained) {
@@ -93,48 +97,49 @@ public interface IMessagesStore {
 
         @Override
         public String toString() {
-            return "PublishEvent{" +
-                    "m_msgID=" + m_msgID +
-                    ", clientID='" + m_clientID + '\'' +
-                    ", m_retain=" + m_retained +
-                    ", m_qos=" + m_qos +
-                    ", m_topic='" + m_topic + '\'' +
-                    '}';
+            return "PublishEvent{" + "m_msgID=" + m_msgID + ", clientID='" + m_clientID + '\'' + ", m_retain="
+                    + m_retained + ", m_qos=" + m_qos + ", m_topic='" + m_topic + '\'' + '}';
         }
     }
 
     /**
      * Used to initialize all persistent store structures
-     * */
+     */
     void initStore();
 
     /**
-     * Persist the message. 
-     * If the message is empty then the topic is cleaned, else it's stored.
+     * Persist the message. If the message is empty then the topic is cleaned, else it's stored.
+     *
+     * @param topic
+     *            for the retained.
+     * @param guid
+     *            of the message to mark as retained.
      */
-    void storeRetained(String topic, String guid);
+    void storeRetained(Topic topic, MessageGUID guid);
 
     /**
      * Return a list of retained messages that satisfy the condition.
+     *
+     * @param condition
+     *            the condition to match during the search.
+     * @return the collection of matching messages.
      */
     Collection<StoredMessage> searchMatching(IMatchingCondition condition);
 
     /**
      * Persist the message.
+     *
+     * @param storedMessage
+     *            the message to store for future usage.
      * @return the unique id in the storage (guid).
-     * */
-    String storePublishForFuture(StoredMessage evt);
-
-    /**
-     * Return the list of persisted publishes for the given clientID.
-     * For QoS1 and QoS2 with clean session flag, this method return the list of 
-     * missed publish events while the client was disconnected.
      */
-    List<StoredMessage> listMessagesInSession(Collection<String> guids);
-    
+    MessageGUID storePublishForFuture(StoredMessage storedMessage);
+
     void dropMessagesInSession(String clientID);
 
-    StoredMessage getMessageByGuid(String guid);
+    StoredMessage getMessageByGuid(MessageGUID guid);
 
-    void cleanRetained(String topic);
+    void cleanRetained(Topic topic);
+
+    int getPendingPublishMessages(String clientID);
 }

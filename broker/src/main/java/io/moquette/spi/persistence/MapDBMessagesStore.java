@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2012-2015 The original author or authors
+ * Copyright (c) 2012-2017 The original author or authorsgetRockQuestions()
  * ------------------------------------------------------
  * All rights reserved. This program and the accompanying materials
  * are made available under the terms of the Eclipse Public License v1.0
@@ -13,14 +13,16 @@
  *
  * You may elect to redistribute this code under either of these licenses.
  */
+
 package io.moquette.spi.persistence;
 
 import io.moquette.spi.IMatchingCondition;
 import io.moquette.spi.IMessagesStore;
+import io.moquette.spi.MessageGUID;
+import io.moquette.spi.impl.subscriptions.Topic;
 import org.mapdb.DB;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
-
 import java.util.*;
 import java.util.concurrent.ConcurrentMap;
 
@@ -35,11 +37,10 @@ class MapDBMessagesStore implements IMessagesStore {
 
     private DB m_db;
 
-    //maps clientID -> guid
-    private ConcurrentMap<String, String> m_retainedStore;
-    //maps guid to message, it's message store
-    private ConcurrentMap<String, IMessagesStore.StoredMessage> m_persistentMessageStore;
-
+    // maps clientID -> guid
+    private ConcurrentMap<Topic, MessageGUID> m_retainedStore;
+    // maps guid to message, it's message store
+    private ConcurrentMap<MessageGUID, IMessagesStore.StoredMessage> m_persistentMessageStore;
 
     MapDBMessagesStore(DB db) {
         m_db = db;
@@ -47,68 +48,95 @@ class MapDBMessagesStore implements IMessagesStore {
 
     @Override
     public void initStore() {
+        LOG.info("Initializing store...");
         m_retainedStore = m_db.getHashMap("retained");
         m_persistentMessageStore = m_db.getHashMap("persistedMessages");
     }
 
     @Override
-    public void storeRetained(String topic, String guid) {
+    public void storeRetained(Topic topic, MessageGUID guid) {
+        LOG.debug("Storing retained messages. Topic = {}, guid = {}.", topic, guid);
         m_retainedStore.put(topic, guid);
     }
 
     @Override
     public Collection<StoredMessage> searchMatching(IMatchingCondition condition) {
-        LOG.debug("searchMatching scanning all retained messages, presents are {}", m_retainedStore.size());
-
+        LOG.debug("Scanning retained messages...");
         List<StoredMessage> results = new ArrayList<>();
-        for (Map.Entry<String, String> entry : m_retainedStore.entrySet()) {
-            final String guid = entry.getValue();
+        for (Map.Entry<Topic, MessageGUID> entry : m_retainedStore.entrySet()) {
+            final MessageGUID guid = entry.getValue();
             StoredMessage storedMsg = m_persistentMessageStore.get(guid);
             if (condition.match(entry.getKey())) {
                 results.add(storedMsg);
             }
         }
 
+        if (LOG.isTraceEnabled()) {
+            LOG.trace("The retained messages have been scanned. MatchingMessages = {}.", results);
+        }
+
         return results;
     }
 
     @Override
-    public String storePublishForFuture(StoredMessage evt) {
-        LOG.debug("storePublishForFuture store evt {}", evt);
-        if (evt.getClientID() == null) {
-            LOG.error("persisting a message without a clientID, bad programming error msg: {}", evt);
-            throw new IllegalArgumentException("\"persisting a message without a clientID, bad programming error");
-        }
-        String guid = UUID.randomUUID().toString();
-        evt.setGuid(guid);
-        m_persistentMessageStore.put(guid, evt);
-        ConcurrentMap<Integer, String> messageIdToGuid = m_db.getHashMap(MapDBSessionsStore.messageId2GuidsMapName(evt.getClientID()));
-        messageIdToGuid.put(evt.getMessageID(), guid);
+    public MessageGUID storePublishForFuture(StoredMessage storedMessage) {
+        assert storedMessage.getClientID() != null : "The message to be persisted must have a valid client ID";
+        MessageGUID guid = new MessageGUID(UUID.randomUUID().toString());
+        storedMessage.setGuid(guid);
+        LOG.debug(
+                "Storing publish event. MqttClientId = {}, messageId = {}, guid = {}, topic = {}.",
+                storedMessage.getClientID(),
+                storedMessage.getMessageID(),
+                guid,
+                storedMessage.getTopic());
+        m_persistentMessageStore.put(guid, storedMessage);
+        ConcurrentMap<Integer, MessageGUID> messageIdToGuid = m_db
+                .getHashMap(MapDBSessionsStore.messageId2GuidsMapName(storedMessage.getClientID()));
+        messageIdToGuid.put(storedMessage.getMessageID(), guid);
         return guid;
     }
 
     @Override
-    public List<StoredMessage> listMessagesInSession(Collection<String> guids) {
-        List<StoredMessage> ret = new ArrayList<>();
-        for (String guid : guids) {
-            ret.add(m_persistentMessageStore.get(guid));
-        }
-        return ret;
-    }
-
-    @Override
     public void dropMessagesInSession(String clientID) {
-        m_db.getHashMap(MapDBSessionsStore.messageId2GuidsMapName(clientID)).clear();
-        m_persistentMessageStore.remove(clientID);
+        LOG.debug("Dropping stored messages. ClientId = {}.", clientID);
+        ConcurrentMap<Integer, MessageGUID> messageIdToGuid = m_db
+                .getHashMap(MapDBSessionsStore.messageId2GuidsMapName(clientID));
+        for (MessageGUID guid : messageIdToGuid.values()) {
+            removeStoredMessage(guid);
+        }
+        messageIdToGuid.clear();
+    }
+
+    void removeStoredMessage(MessageGUID guid) {
+        // remove only the not retained and no more referenced
+        StoredMessage storedMessage = m_persistentMessageStore.get(guid);
+        if (!storedMessage.isRetained()) {
+            LOG.debug(
+                    "Dropping stored message. ClientId = {}, messageId = {}, guid = {}, topic = {}.",
+                    storedMessage.getClientID(),
+                    storedMessage.getMessageID(),
+                    guid,
+                    storedMessage.getTopic());
+            m_persistentMessageStore.remove(guid);
+        }
     }
 
     @Override
-    public StoredMessage getMessageByGuid(String guid) {
+    public StoredMessage getMessageByGuid(MessageGUID guid) {
+        LOG.debug("Retrieving stored message. Guid = {}.", guid);
         return m_persistentMessageStore.get(guid);
     }
 
     @Override
-    public void cleanRetained(String topic) {
+    public void cleanRetained(Topic topic) {
+        LOG.debug("Cleaning retained messages. Topic = {}.", topic);
         m_retainedStore.remove(topic);
+    }
+
+    @Override
+    public int getPendingPublishMessages(String clientID) {
+        ConcurrentMap<Integer, MessageGUID> messageIdToGuidMap = m_db
+                .getHashMap(MapDBSessionsStore.messageId2GuidsMapName(clientID));
+        return messageIdToGuidMap.size();
     }
 }
